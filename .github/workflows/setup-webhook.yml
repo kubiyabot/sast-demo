@@ -1,0 +1,90 @@
+name: Setup Kubiya SAST Webhook
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/setup-webhook.yml'
+
+jobs:
+  setup-webhook:
+    name: Configure Webhook for SAST Scanner
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check if webhook exists
+        id: check-webhook
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WEBHOOK_URL="http://control-plane.kubiya.ai/api/v1/jobs/webhook/RY0ST_G-5ePs7ImH7tEx_A"
+          
+          # Get existing webhooks
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/hooks)
+          
+          # Check if our webhook already exists
+          WEBHOOK_EXISTS=$(echo "$RESPONSE" | jq -r --arg url "$WEBHOOK_URL" '.[] | select(.config.url == $url) | .id')
+          
+          if [ -n "$WEBHOOK_EXISTS" ]; then
+            echo "webhook_exists=true" >> $GITHUB_OUTPUT
+            echo "webhook_id=$WEBHOOK_EXISTS" >> $GITHUB_OUTPUT
+            echo "✅ Webhook already exists with ID: $WEBHOOK_EXISTS"
+          else
+            echo "webhook_exists=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Webhook does not exist yet"
+          fi
+
+      - name: Create webhook
+        if: steps.check-webhook.outputs.webhook_exists == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WEBHOOK_URL="http://control-plane.kubiya.ai/api/v1/jobs/webhook/RY0ST_G-5ePs7ImH7tEx_A"
+          
+          curl -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/hooks \
+            -d '{
+              "name": "web",
+              "active": true,
+              "events": ["push"],
+              "config": {
+                "url": "'"$WEBHOOK_URL"'",
+                "content_type": "json",
+                "insecure_ssl": "0"
+              }
+            }' | jq .
+          
+          echo "✅ Webhook created successfully!"
+
+      - name: Verify webhook
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WEBHOOK_URL="http://control-plane.kubiya.ai/api/v1/jobs/webhook/RY0ST_G-5ePs7ImH7tEx_A"
+          
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/hooks)
+          
+          WEBHOOK_ID=$(echo "$RESPONSE" | jq -r --arg url "$WEBHOOK_URL" '.[] | select(.config.url == $url) | .id')
+          
+          if [ -n "$WEBHOOK_ID" ]; then
+            echo "✅ Webhook verified successfully!"
+            echo "📋 Webhook ID: $WEBHOOK_ID"
+            echo "🔗 Webhook URL: $WEBHOOK_URL"
+            echo "📌 Events: push to any branch"
+            echo ""
+            echo "🎯 The automated SAST scanner will now run on every push to main!"
+          else
+            echo "❌ Webhook verification failed"
+            exit 1
+          fi
